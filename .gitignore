@@ -213,3 +213,6 @@ pip-log.txt
 
 #Mr Developer
 .mr.developer.cfg
+src/vmware/vix.h
+src/vmware/vix.lib
+src/vmware/vm_basic_types.h
