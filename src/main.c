@@ -281,7 +281,7 @@ main(int argc, char **argv)
 		if ((strcmp(argv[i], "nogui") == 0) || (strcmp(argv[i], "-nogui") == 0)) {
 			powerOptions = VIX_VMPOWEROP_NORMAL;
 		}
-		if ((strcmp(argv[i], "--h") == 0) || (strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "help") == 0)) {
+		if ((strcmp(argv[i], "help") == 0) || (strcmp(argv[i], "-help") == 0) || (strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--h") == 0)) {
 			usage();
 			exit(EXIT_FAILURE);
 		}
