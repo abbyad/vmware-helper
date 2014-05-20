@@ -22,7 +22,7 @@ Examples:
 ```
 
 # Additional Files
-To obtain the required files install VMware VIX SDK. Copy the following files from the VIX installation to your VMware-Helper directory. 
+To obtain the required files install VMware VIX SDK. Copy the following files from the VIX installation to your VMware-Helper directory. Once these are copied you can compile, link and run VMware-Helper without VIX, so feel free to uninstall it if you wish.
 
 **Copy to `src\vmware`**
 - vix.h
@@ -44,4 +44,4 @@ To obtain the required files install VMware VIX SDK. Copy the following files fr
 - ssleay32.dll
 - vix.dll
 
-Note: For running against VMware Player 6, use the .dll files in "Workstation-10.0.0-and-vSphere-5.5.0\32bit".
+Note: For running against VMware Player 6, use the DLL files from the `Workstation-10.0.0-and-vSphere-5.5.0\32bit` folder.
