@@ -12,6 +12,12 @@
 #define POLLINTERVAL 1000	// milliseconds
 #define STARTUPWAIT 0	// milliseconds
 
+// Exit codes
+#define STATUS_ON	10
+#define STATUS_OFF	11
+
+// #define DEBUG
+
 /*
  * Certain arguments differ when using VIX with VMware Server 2.0
  * and VMware Workstation.
@@ -65,6 +71,12 @@ char *vmxPath;
 char *command;
 VixToolsState powerState = 0;
 VixVMPowerOpOptions powerOptions = VIX_VMPOWEROP_LAUNCH_GUI;	// By default launches the UI when powering on the virtual machine.
+Bool wait = FALSE;
+Bool heartbeat = FALSE;
+FILE *fHeartbeat = NULL;
+char cHeartbeat[128] = "";
+char *strIPAddress = "";
+int fErr;
 
 VixHandle hostHandle = VIX_INVALID_HANDLE;
 VixHandle jobHandle = VIX_INVALID_HANDLE;
@@ -83,17 +95,18 @@ __int64 lTime;
 static void
 usage()
 {
-   fprintf(stderr, "\n\
+   fprintf(stdout, "\n\
 Usage: %s <command> <vmxpath> [options]\n\
 \n\
   <command>\n\
-    the desired action, either `-start`, `-suspend`, `-stop`, or `-status`\n\
+    the desired action, either `-start`, `-suspend`, `-stop`, `-status` or -`getip`\n\
   \n\
   <vmxpath>\n\
     %s\n\
   \n\
   [options]\n\
       -nogui: start virtual machine without UI\n\
+	  -wait: after starting wait for virtual machine to exit\n\
       -help: shows this help\n\
 \n\
 Examples:\n\
@@ -102,10 +115,11 @@ Examples:\n\
 ", progName, VMXPATH_INFO, progName, progName);
 }
 
+
 static char* getTime(){
 	time(&lTime);
 
-	if (gmtime_s(&sTm, &lTime)) {
+	if (localtime_s(&sTm, &lTime)) {
 		// error in conversion
 		sprintf_s(sTime, sizeof(sTime), "");
 	}
@@ -115,13 +129,63 @@ static char* getTime(){
 	return sTime;
 }
 
+static void doHeartbeat(char *msg) {
+	if (heartbeat) {
+		fErr = fopen_s(&fHeartbeat, "heartbeat.log", "w");
+		if (fErr)
+		{
+			fprintf(stderr, "[%s] Failed to open heartbeat file for writing [%d] \n", getTime(), fErr);
+		}
+		else {
+#ifdef DEBUG
+			fprintf(stdout, "[%s] Opened heartbeat file for writing\n", getTime());
+#endif
+			fprintf(fHeartbeat, "[%s] %s", getTime(), msg);
+		}
+
+		// close regardless of whether it was opened or not
+		if (fHeartbeat) {
+			fErr = fclose(fHeartbeat);
+			if (fErr == 0)
+			{
+#ifdef DEBUG 
+				fprintf(stdout, "[%s] The heartbeat file was closed\n", getTime());
+#endif
+			}
+			else
+			{
+				fprintf(stderr, "[%s] Failed to close the heartbeat file [%d] \n", getTime(), fErr);
+			}
+		}
+	}
+}
+
+static void exitMain(int code) {
+	if (fHeartbeat) {
+		fErr = fclose(fHeartbeat);
+		if (fErr == 0)
+		{
+#ifdef DEBUG 
+			fprintf(stdout, "[%s] The heartbeat file was closed\n", getTime());
+#endif
+		}
+		else
+		{
+			fprintf(stderr, "[%s] Failed to close the heartbeat file [%d] \n", getTime(), fErr);
+		}
+	}
+	exit(code);
+}
+
 static void errorAbort() {
+#ifdef DEBUG
 	fprintf(stderr, "[%s] ABORTED\n", getTime());
+#endif
 	Vix_ReleaseHandle(jobHandle);
 	Vix_ReleaseHandle(vmHandle);
 
 	VixHost_Disconnect(hostHandle);
-	exit(EXIT_FAILURE);
+	exitMain(EXIT_FAILURE);
 }
 
 static void vmConnectOpen()
@@ -164,7 +228,7 @@ static void vmConnectOpen()
 
 static void vmGetStatus()
 {
-	// Test if already powered
+	// Should test if already powered
 	err = Vix_GetProperties(vmHandle,
 		VIX_PROPERTY_VM_POWER_STATE,
 		&powerState,
@@ -175,16 +239,68 @@ static void vmGetStatus()
 	}
 }
 
-static void vmStatus()
+static void vmGetIP()
 {
-	fprintf(stderr, "[%s] Checking status for \"%s\"\n", getTime(), vmxPath);
-	vmGetStatus();
-	if (VIX_POWERSTATE_POWERED_ON & powerState) {
-		fprintf(stderr, "[%s] Virtual machine is powered on\n", getTime());
+	strIPAddress = "";
+	// Wait until guest is completely booted.
+	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
+		10, // timeoutInSeconds
+		NULL, // callbackProc
+		NULL); // clientData
+
+	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		return;
+	}
+
+	jobHandle = VixVM_ReadVariable(vmHandle,
+		VIX_VM_GUEST_VARIABLE,
+		"ip",
+		0, // options
+		NULL, // callbackProc
+		NULL); // clientData);
+	err = VixJob_Wait(jobHandle,
+		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
+		&strIPAddress,
+		VIX_PROPERTY_NONE);
+
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] Failed to get IP [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		return;
+	}
+}
+
+static void printIPAddress(){
+	vmGetIP();
+	if (strcmp(strIPAddress, "") == 0) {
+		fprintf(stdout, "[%s] Could not obtain IP Address\n", getTime());
 	}
 	else {
-		fprintf(stderr, "[%s] Virtual machine is powered off\n", getTime());
+		fprintf(stdout, "[%s] IP Address: %s\n", getTime(), strIPAddress);
 	}
+}
+
+static void vmStatus()
+{
+#ifdef DEBUG
+	fprintf(stderr, "[%s] Checking status for \"%s\"\n", getTime(), vmxPath);
+#endif
+	vmGetStatus();
+	if (VIX_POWERSTATE_POWERED_ON & powerState) {
+		fprintf(stdout, "[%s] Virtual machine is powered on\n", getTime());
+		printIPAddress();
+		exitMain(STATUS_ON);
+	}
+	else {
+		fprintf(stdout, "[%s] Virtual machine is powered off\n", getTime());
+		exitMain(STATUS_OFF);
+	}
+	// not releasing job handle?
 }
 static void vmStart()
 {
@@ -204,26 +320,46 @@ static void vmStart()
 			fprintf(stderr, "[%s] Failed to start virtual machine [%d]\n", getTime(), VIX_ERROR_CODE(err));
 			errorAbort();
 		}
-	}
-	Sleep(STARTUPWAIT);
-	do {
-		// Test the power state.
-		vmGetStatus(); 
-		if (VIX_POWERSTATE_POWERED_ON & powerState) {
-			// virtual machine is powered on
-			fprintf(stderr, "[%s] Virtual machine running\n", getTime());
-		}
-		else if (VIX_POWERSTATE_POWERED_OFF & powerState) {
-			// virtual machine is powered off
-			break;
-		}
 		else {
-			// only checked for Power State, so will never get here
-			fprintf(stderr, "[%s] Virtual machine in transition state [%d]\n", getTime(), powerState);
+			fprintf(stdout, "[%s] Virtual machine started\n", getTime());
 		}
-		Sleep(POLLINTERVAL);
-	} while (VIX_POWERSTATE_POWERED_ON & powerState);
+	}
 
+	if (wait)
+	{
+		Sleep(STARTUPWAIT);
+		do {
+			// Test the power state.
+			vmGetStatus();
+			if (VIX_POWERSTATE_POWERED_ON & powerState) {
+				// virtual machine is powered on
+#ifdef DEBUG
+				fprintf(stdout, "[%s] Virtual machine running\n", getTime());
+#endif
+				if (heartbeat) {
+					vmGetIP();
+					strcpy_s(cHeartbeat, _countof(cHeartbeat), "RUNNING ");
+					strcat_s(cHeartbeat, _countof(cHeartbeat), strIPAddress);
+					doHeartbeat(cHeartbeat);
+				}
+			}
+			else if (VIX_POWERSTATE_POWERED_OFF & powerState) {
+				// virtual machine is powered off
+				if (heartbeat) {
+					doHeartbeat("STOPPED");
+				}
+				break;
+			}
+			else {
+				// only checked for Power State, so will never get here
+				if (heartbeat) {
+					doHeartbeat("TRANSITION");
+				}
+				fprintf(stderr, "[%s] Virtual machine in transition state [%d]\n", getTime(), powerState);
+			}
+			Sleep(POLLINTERVAL);
+		} while (VIX_POWERSTATE_POWERED_ON & powerState);
+	}
 	Vix_ReleaseHandle(jobHandle);
 	jobHandle = VIX_INVALID_HANDLE;
 }
@@ -240,7 +376,7 @@ static void vmStop()
 		errorAbort();
 	}
 	else {
-		fprintf(stderr, "[%s] Stopped virtual machine [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		fprintf(stdout, "[%s] Stopped virtual machine [%d]\n", getTime(), VIX_ERROR_CODE(err));
 	}
 	Vix_ReleaseHandle(jobHandle);
 	jobHandle = VIX_INVALID_HANDLE;
@@ -257,7 +393,7 @@ static void vmSuspend(){
 		errorAbort();
 	}
 	else {
-		fprintf(stderr, "[%s] Suspended virtual machine [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		fprintf(stdout, "[%s] Suspended virtual machine [%d]\n", getTime(), VIX_ERROR_CODE(err));
 	}
 	Vix_ReleaseHandle(jobHandle);
 	jobHandle = VIX_INVALID_HANDLE;
@@ -273,7 +409,7 @@ main(int argc, char **argv)
 		vmxPath = argv[2];
     } else {
         usage();
-        exit(EXIT_FAILURE);
+        exitMain(EXIT_FAILURE);
     }
 
 	// check for flags
@@ -281,9 +417,15 @@ main(int argc, char **argv)
 		if ((strcmp(argv[i], "nogui") == 0) || (strcmp(argv[i], "-nogui") == 0)) {
 			powerOptions = VIX_VMPOWEROP_NORMAL;
 		}
+		if ((strcmp(argv[i], "wait") == 0) || (strcmp(argv[i], "-wait") == 0)) {
+			wait = TRUE;
+		}
+		if ((strcmp(argv[i], "heartbeat") == 0) || (strcmp(argv[i], "-heartbeat") == 0)) {
+			heartbeat = TRUE;
+		}
 		if ((strcmp(argv[i], "help") == 0) || (strcmp(argv[i], "-help") == 0) || (strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--h") == 0)) {
 			usage();
-			exit(EXIT_FAILURE);
+			exitMain(EXIT_FAILURE);
 		}
 	}
 
@@ -301,12 +443,17 @@ main(int argc, char **argv)
 	else if ((strcmp(command, "status") == 0) || (strcmp(command, "-status") == 0)) {
 		vmStatus();
 	}
+	else if ((strcmp(command, "getip") == 0) || (strcmp(command, "-getip") == 0)) {
+		vmGetIP();
+	}
 	else {
 		usage();
-		exit(EXIT_FAILURE);
+		exitMain(EXIT_FAILURE);
 	}
 
-	fprintf(stderr, "[%s] Finished\n", getTime());
-	
-	exit(EXIT_SUCCESS);
+#ifdef DEBUG 
+	fprintf(stdout, "[%s] Finished\n", getTime());
+#endif
+
+	exitMain(EXIT_SUCCESS);
 }
