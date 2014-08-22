@@ -1,5 +1,5 @@
 # Introduction
-VMware-Helper is a command line tool to start, stop, suspend virtual images using VMware Player. It is similar to vmware-run tool provided by VMware but does not require [VMware VIX SDK](https://www.vmware.com/support/developer/vix-api/) to run, which comes as a 150MB installer. VMware-Helper is 14MB (under 6MB compressed), including the redistributable VMware DLLs. 
+VMware-Helper is a command line tool to start, stop, suspend virtual images using VMware Player. It includes the basic functionality found in the `vmrun` tool provided by VMware, but the distributable does not require [VMware VIX SDK](https://www.vmware.com/support/developer/vix-api/) which comes as a 150MB installer. VMware-Helper is 14MB (under 6MB compressed), including the VMware redistributable DLLs.
 
 # Usage
 
