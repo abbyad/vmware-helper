@@ -76,6 +76,7 @@ Bool heartbeat = FALSE;
 FILE *fHeartbeat = NULL;
 char cHeartbeat[128] = "";
 char *strIPAddress = "";
+char *strModemStatus = "";
 int fErr;
 
 VixHandle hostHandle = VIX_INVALID_HANDLE;
@@ -140,7 +141,9 @@ static void doHeartbeat(char *msg) {
 #ifdef DEBUG
 			fprintf(stdout, "[%s] Opened heartbeat file for writing\n", getTime());
 #endif
-			fprintf(fHeartbeat, "[%s] %s", getTime(), msg);
+//			fprintf(fHeartbeat, "[%s] %s", getTime(), msg);
+			fprintf(fHeartbeat, "%s", msg);
+			fprintf(fHeartbeat, "date = %s", getTime());
 		}
 
 		// close regardless of whether it was opened or not
@@ -275,6 +278,77 @@ static void vmGetIP()
 	}
 }
 
+static void vmGetModemStatus()
+{
+	strModemStatus = "";
+	// Wait until guest is completely booted.
+	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
+		10, // timeoutInSeconds
+		NULL, // callbackProc
+		NULL); // clientData
+
+	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		return;
+	}
+
+	jobHandle = VixVM_ReadVariable(vmHandle,
+		VIX_VM_GUEST_VARIABLE,
+		"modem_status",
+		0, // options
+		NULL, // callbackProc
+		NULL); // clientData);
+	err = VixJob_Wait(jobHandle,
+		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
+		&strModemStatus,
+		VIX_PROPERTY_NONE);
+
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] Failed to get modem status [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		return;
+	}
+}
+
+static void vmGetGuestVars(char *strValue, char strName)
+{
+	// Wait until guest is completely booted.
+	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
+		10, // timeoutInSeconds
+		NULL, // callbackProc
+		NULL); // clientData
+
+	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		return;
+	}
+
+	jobHandle = VixVM_ReadVariable(vmHandle,
+		VIX_VM_GUEST_VARIABLE,
+		strName,
+		0, // options
+		NULL, // callbackProc
+		NULL); // clientData);
+	err = VixJob_Wait(jobHandle,
+		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
+		&strValue,
+		VIX_PROPERTY_NONE);
+
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] Failed to get guest variable `%s` [%d]\n", getTime(), strName, VIX_ERROR_CODE(err));
+		return;
+	}
+}
+
 static void printIPAddress(){
 	vmGetIP();
 	if (strcmp(strIPAddress, "") == 0) {
@@ -338,22 +412,33 @@ static void vmStart()
 #endif
 				if (heartbeat) {
 					vmGetIP();
-					strcpy_s(cHeartbeat, _countof(cHeartbeat), "RUNNING ");
+					strcpy_s(cHeartbeat, _countof(cHeartbeat), "vm = RUNNING \n");
+
+					strcat_s(cHeartbeat, _countof(cHeartbeat), "ip = ");
 					strcat_s(cHeartbeat, _countof(cHeartbeat), strIPAddress);
+					strcat_s(cHeartbeat, _countof(cHeartbeat), "\n"); 
+
+					 // guest vars
+					vmGetModemStatus();
+
+					strcat_s(cHeartbeat, _countof(cHeartbeat), "modem = ");
+					strcat_s(cHeartbeat, _countof(cHeartbeat), strModemStatus);
+					strcat_s(cHeartbeat, _countof(cHeartbeat), "\n");
+
 					doHeartbeat(cHeartbeat);
 				}
 			}
 			else if (VIX_POWERSTATE_POWERED_OFF & powerState) {
 				// virtual machine is powered off
 				if (heartbeat) {
-					doHeartbeat("STOPPED");
+					doHeartbeat("vm = STOPPED\n");
 				}
 				break;
 			}
 			else {
 				// only checked for Power State, so will never get here
 				if (heartbeat) {
-					doHeartbeat("TRANSITION");
+					doHeartbeat("vm = TRANSITION\n");
 				}
 				fprintf(stderr, "[%s] Virtual machine in transition state [%d]\n", getTime(), powerState);
 			}
