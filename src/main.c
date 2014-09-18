@@ -4,8 +4,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <windows.h>
+#include <crtdbg.h>  // For _CrtSetReportMode
+#include <malloc.h>
 
 #include "vmware\vix.h"
 
@@ -74,10 +77,14 @@ VixVMPowerOpOptions powerOptions = VIX_VMPOWEROP_LAUNCH_GUI;	// By default launc
 Bool wait = FALSE;
 Bool heartbeat = FALSE;
 FILE *fHeartbeat = NULL;
-char cHeartbeat[128] = "";
 char *strIPAddress = "";
-char *strModemStatus = "";
+char *strHeartbeat;
+char *strVars = "";
+char strVarsTmp[256];
 int fErr;
+
+char *token;
+char *next_token;
 
 VixHandle hostHandle = VIX_INVALID_HANDLE;
 VixHandle jobHandle = VIX_INVALID_HANDLE;
@@ -100,20 +107,23 @@ usage()
 Usage: %s <command> <vmxpath> [options]\n\
 \n\
   <command>\n\
-    the desired action, either `-start`, `-suspend`, `-stop`, `-status` or -`getip`\n\
+    desired action, either `-start`, `-suspend`, `-stop`, `-status` or `-getip`\n\
   \n\
   <vmxpath>\n\
     %s\n\
   \n\
   [options]\n\
       -nogui: start virtual machine without UI\n\
-	  -wait: after starting wait for virtual machine to exit\n\
+      -wait: after starting wait for virtual machine to exit\n\
       -help: shows this help\n\
+      -heartbeat: maintains ini file `heartbeat.log` with status information\n\
+      -vars \"space separated variables\": guestinfo values for heartbeat\n\
 \n\
 Examples:\n\
   %s -start C:\\Users\\Name\\VirtualMachine.vmx\n\
+  %s -start vm.vmx -heartbeat -vars \"ip modem_status\"\n\
   %s -stop \"C:\\Users\\User Name\\Virtual Machine.vmx\"\n\n\
-", progName, VMXPATH_INFO, progName, progName);
+", progName, VMXPATH_INFO, progName, progName, progName);
 }
 
 
@@ -130,6 +140,17 @@ static char* getTime(){
 	return sTime;
 }
 
+void myInvalidParameterHandler(const wchar_t* expression,
+	const wchar_t* function,
+	const wchar_t* file,
+	unsigned int line,
+	uintptr_t pReserved)
+{
+	wprintf(L"Invalid parameter detected in function %s.\n", function);
+	wprintf(L" File: %s Line: %d\n", file, line);
+	wprintf(L"Expression: %s\n", expression);
+}
+
 static void doHeartbeat(char *msg) {
 	if (heartbeat) {
 		fErr = fopen_s(&fHeartbeat, "heartbeat.log", "w");
@@ -141,9 +162,8 @@ static void doHeartbeat(char *msg) {
 #ifdef DEBUG
 			fprintf(stdout, "[%s] Opened heartbeat file for writing\n", getTime());
 #endif
-//			fprintf(fHeartbeat, "[%s] %s", getTime(), msg);
+			fprintf(fHeartbeat, "date = %s\n", getTime());
 			fprintf(fHeartbeat, "%s", msg);
-			fprintf(fHeartbeat, "date = %s", getTime());
 		}
 
 		// close regardless of whether it was opened or not
@@ -177,6 +197,9 @@ static void exitMain(int code) {
 			fprintf(stderr, "[%s] Failed to close the heartbeat file [%d] \n", getTime(), fErr);
 		}
 	}
+	
+	free(strHeartbeat);
+
 	exit(code);
 }
 
@@ -242,111 +265,47 @@ static void vmGetStatus()
 	}
 }
 
+static char* vmGetGuestVars(char* keyName)
+{
+	char* keyValue;
+	keyValue = "";
+	// Wait until guest is completely booted.
+	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
+		10, // timeoutInSeconds
+		NULL, // callbackProc
+		NULL); // clientData
+
+	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
+		return "";
+	}
+
+	jobHandle = VixVM_ReadVariable(vmHandle,
+		VIX_VM_GUEST_VARIABLE,
+		keyName,
+		0, // options
+		NULL, // callbackProc
+		NULL); // clientData);
+	err = VixJob_Wait(jobHandle,
+		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
+		&keyValue,
+		VIX_PROPERTY_NONE);
+
+	Vix_ReleaseHandle(jobHandle);
+
+	if (VIX_FAILED(err)) {
+		fprintf(stderr, "[%s] Failed to get guest variable `%s` [%d]\n", getTime(), keyName, VIX_ERROR_CODE(err));
+		return "";
+	}
+	return keyValue;
+}
+
 static void vmGetIP()
 {
-	strIPAddress = "";
-	// Wait until guest is completely booted.
-	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
-		10, // timeoutInSeconds
-		NULL, // callbackProc
-		NULL); // clientData
-
-	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
-	Vix_ReleaseHandle(jobHandle);
-
-	if (VIX_FAILED(err)) {
-		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
-		return;
-	}
-
-	jobHandle = VixVM_ReadVariable(vmHandle,
-		VIX_VM_GUEST_VARIABLE,
-		"ip",
-		0, // options
-		NULL, // callbackProc
-		NULL); // clientData);
-	err = VixJob_Wait(jobHandle,
-		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
-		&strIPAddress,
-		VIX_PROPERTY_NONE);
-
-	Vix_ReleaseHandle(jobHandle);
-
-	if (VIX_FAILED(err)) {
-		fprintf(stderr, "[%s] Failed to get IP [%d]\n", getTime(), VIX_ERROR_CODE(err));
-		return;
-	}
-}
-
-static void vmGetModemStatus()
-{
-	strModemStatus = "";
-	// Wait until guest is completely booted.
-	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
-		10, // timeoutInSeconds
-		NULL, // callbackProc
-		NULL); // clientData
-
-	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
-	Vix_ReleaseHandle(jobHandle);
-
-	if (VIX_FAILED(err)) {
-		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
-		return;
-	}
-
-	jobHandle = VixVM_ReadVariable(vmHandle,
-		VIX_VM_GUEST_VARIABLE,
-		"modem_status",
-		0, // options
-		NULL, // callbackProc
-		NULL); // clientData);
-	err = VixJob_Wait(jobHandle,
-		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
-		&strModemStatus,
-		VIX_PROPERTY_NONE);
-
-	Vix_ReleaseHandle(jobHandle);
-
-	if (VIX_FAILED(err)) {
-		fprintf(stderr, "[%s] Failed to get modem status [%d]\n", getTime(), VIX_ERROR_CODE(err));
-		return;
-	}
-}
-
-static void vmGetGuestVars(char *strValue, char strName)
-{
-	// Wait until guest is completely booted.
-	jobHandle = VixVM_WaitForToolsInGuest(vmHandle,
-		10, // timeoutInSeconds
-		NULL, // callbackProc
-		NULL); // clientData
-
-	err = VixJob_Wait(jobHandle, VIX_PROPERTY_NONE);
-	Vix_ReleaseHandle(jobHandle);
-
-	if (VIX_FAILED(err)) {
-		fprintf(stderr, "[%s] VM not yet loaded [%d]\n", getTime(), VIX_ERROR_CODE(err));
-		return;
-	}
-
-	jobHandle = VixVM_ReadVariable(vmHandle,
-		VIX_VM_GUEST_VARIABLE,
-		strName,
-		0, // options
-		NULL, // callbackProc
-		NULL); // clientData);
-	err = VixJob_Wait(jobHandle,
-		VIX_PROPERTY_JOB_RESULT_VM_VARIABLE_STRING,
-		&strValue,
-		VIX_PROPERTY_NONE);
-
-	Vix_ReleaseHandle(jobHandle);
-
-	if (VIX_FAILED(err)) {
-		fprintf(stderr, "[%s] Failed to get guest variable `%s` [%d]\n", getTime(), strName, VIX_ERROR_CODE(err));
-		return;
-	}
+	strIPAddress = vmGetGuestVars("ip");
 }
 
 static void printIPAddress(){
@@ -376,9 +335,23 @@ static void vmStatus()
 	}
 	// not releasing job handle?
 }
+
+static void appendHeartbeat(char * str, int length)
+{
+	if ((strHeartbeat = realloc(strHeartbeat, _msize(strHeartbeat) + length)) != NULL)
+	{
+		strncat_s(strHeartbeat, _msize(strHeartbeat), str, length);
+	}
+	else {		// error
+		fprintf(stderr, "[%s] Failed to allocate additional %d bytes (total %d) to prepare hearbeat file\n", getTime(), length, _msize(strHeartbeat) + length, token);
+		exitMain(EXIT_FAILURE);
+	}
+}
+
 static void vmStart()
 {
 	vmGetStatus();
+
 	if (VIX_POWERSTATE_POWERED_ON & powerState) {
 		// virtual machine is powered on
 		fprintf(stderr, "[%s] Virtual machine already running\n", getTime());
@@ -403,6 +376,10 @@ static void vmStart()
 	{
 		Sleep(STARTUPWAIT);
 		do {
+			
+			strHeartbeat = malloc(2);
+			strcpy_s(strHeartbeat, _countof(strHeartbeat), "\0");
+
 			// Test the power state.
 			vmGetStatus();
 			if (VIX_POWERSTATE_POWERED_ON & powerState) {
@@ -411,21 +388,35 @@ static void vmStart()
 				fprintf(stdout, "[%s] Virtual machine running\n", getTime());
 #endif
 				if (heartbeat) {
-					vmGetIP();
-					strcpy_s(cHeartbeat, _countof(cHeartbeat), "vm = RUNNING \n");
 
-					strcat_s(cHeartbeat, _countof(cHeartbeat), "ip = ");
-					strcat_s(cHeartbeat, _countof(cHeartbeat), strIPAddress);
-					strcat_s(cHeartbeat, _countof(cHeartbeat), "\n"); 
+					char* s = "vm = RUNNING\n";
+					appendHeartbeat(s, _scprintf("%s", s));
 
-					 // guest vars
-					vmGetModemStatus();
+					// get guest vars, starting with first token
+					strcpy_s(strVarsTmp, _countof(strVarsTmp), strVars);
+					token = strtok_s(strVarsTmp, " ", &next_token);
 
-					strcat_s(cHeartbeat, _countof(cHeartbeat), "modem = ");
-					strcat_s(cHeartbeat, _countof(cHeartbeat), strModemStatus);
-					strcat_s(cHeartbeat, _countof(cHeartbeat), "\n");
+					// walk through other tokens
+					while (token != NULL)
+					{
+						char* v = vmGetGuestVars(token);
+						int c = _scprintf("%s = %s\n", token, v) + 1;
 
-					doHeartbeat(cHeartbeat);
+						if ((s = malloc(c)) != NULL)
+						{
+							sprintf_s(s, _msize(s), "%s = %s\n", token, v);
+							appendHeartbeat(s, _msize(s));
+						}
+						else { // error
+							fprintf(stderr, "[%s] Failed to allocate %d bytes for the token `%s`\n", getTime(), c, token);
+							exitMain(EXIT_FAILURE);
+						}
+						free(s);
+
+						token = strtok_s(NULL, " ", &next_token);
+					}
+					
+					doHeartbeat(strHeartbeat);
 				}
 			}
 			else if (VIX_POWERSTATE_POWERED_OFF & powerState) {
@@ -488,6 +479,14 @@ static void vmSuspend(){
 int
 main(int argc, char **argv)
 {
+	// use our invalid parameter handler for more graceful error handling and prevent crashes
+	_invalid_parameter_handler oldHandler, newHandler;
+	newHandler = myInvalidParameterHandler;
+	oldHandler = _set_invalid_parameter_handler(newHandler);
+
+	// Disable the message box for assertions.
+	_CrtSetReportMode(_CRT_ASSERT, 0);
+
     progName = argv[0];
 	if (argc >= 3) {
 		command = argv[1];
@@ -507,6 +506,32 @@ main(int argc, char **argv)
 		}
 		if ((strcmp(argv[i], "heartbeat") == 0) || (strcmp(argv[i], "-heartbeat") == 0)) {
 			heartbeat = TRUE;
+		}
+		if ((strcmp(argv[i], "var") == 0) || (strcmp(argv[i], "-var") == 0)) {
+			if (argc > i + 1) {
+				strVars = argv[i + 1];
+/*
+				fprintf(stderr, "[%s] Vars: [%s]\n", getTime(), strVars);
+
+				char *token;
+				char *next_token;
+
+				// get the first token
+				token = strtok_s(strVars, " ", &next_token);
+
+				// walk through other tokens
+				while (token != NULL)
+				{
+					fprintf(stderr, " %s\n", token);
+
+					token = strtok_s(NULL, " ", &next_token);
+				}
+*/
+			}
+			else {
+				usage();
+				exitMain(EXIT_FAILURE);
+			}
 		}
 		if ((strcmp(argv[i], "help") == 0) || (strcmp(argv[i], "-help") == 0) || (strcmp(argv[i], "--help") == 0) || (strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--h") == 0)) {
 			usage();
@@ -529,7 +554,7 @@ main(int argc, char **argv)
 		vmStatus();
 	}
 	else if ((strcmp(command, "getip") == 0) || (strcmp(command, "-getip") == 0)) {
-		vmGetIP();
+		printIPAddress();
 	}
 	else {
 		usage();
