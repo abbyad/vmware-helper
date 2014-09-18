@@ -507,7 +507,7 @@ main(int argc, char **argv)
 		if ((strcmp(argv[i], "heartbeat") == 0) || (strcmp(argv[i], "-heartbeat") == 0)) {
 			heartbeat = TRUE;
 		}
-		if ((strcmp(argv[i], "var") == 0) || (strcmp(argv[i], "-var") == 0)) {
+		if ((strcmp(argv[i], "vars") == 0) || (strcmp(argv[i], "-vars") == 0)) {
 			if (argc > i + 1) {
 				strVars = argv[i + 1];
 /*
