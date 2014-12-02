@@ -162,7 +162,7 @@ static void doHeartbeat(char *msg) {
 #ifdef DEBUG
 			fprintf(stdout, "[%s] Opened heartbeat file for writing\n", getTime());
 #endif
-			fprintf(fHeartbeat, "date = %s\n", getTime());
+			fprintf(fHeartbeat, "date=%s\n", getTime());
 			fprintf(fHeartbeat, "%s", msg);
 		}
 
@@ -389,7 +389,7 @@ static void vmStart()
 #endif
 				if (heartbeat) {
 
-					char* s = "vm = RUNNING\n";
+					char* s = "vm=RUNNING\n";
 					appendHeartbeat(s, _scprintf("%s", s));
 
 					// get guest vars, starting with first token
@@ -400,11 +400,11 @@ static void vmStart()
 					while (token != NULL)
 					{
 						char* v = vmGetGuestVars(token);
-						int c = _scprintf("%s = %s\n", token, v) + 1;
+						int c = _scprintf("%s=%s\n", token, v) + 1;
 
 						if ((s = malloc(c)) != NULL)
 						{
-							sprintf_s(s, _msize(s), "%s = %s\n", token, v);
+							sprintf_s(s, _msize(s), "%s=%s\n", token, v);
 							appendHeartbeat(s, _msize(s));
 						}
 						else { // error
@@ -422,14 +422,14 @@ static void vmStart()
 			else if (VIX_POWERSTATE_POWERED_OFF & powerState) {
 				// virtual machine is powered off
 				if (heartbeat) {
-					doHeartbeat("vm = STOPPED\n");
+					doHeartbeat("vm=STOPPED\n");
 				}
 				break;
 			}
 			else {
 				// only checked for Power State, so will never get here
 				if (heartbeat) {
-					doHeartbeat("vm = TRANSITION\n");
+					doHeartbeat("vm=TRANSITION\n");
 				}
 				fprintf(stderr, "[%s] Virtual machine in transition state [%d]\n", getTime(), powerState);
 			}
