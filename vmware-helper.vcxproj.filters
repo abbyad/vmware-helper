@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="src\main.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\vmware\vix.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Certificates">
+      <UniqueIdentifier>{755bee7b-e845-45fd-8bef-0af9a924d55a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Certificates\medic-mobile-ssd-all-20141112.p12">
+      <Filter>Certificates</Filter>
+    </None>
+  </ItemGroup>
+</Project>

@@ -216,3 +216,4 @@ pip-log.txt
 src/vmware/vix.h
 src/vmware/vix.lib
 src/vmware/vm_basic_types.h
+*.p12

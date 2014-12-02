@@ -76,12 +76,23 @@
       <EntryPointSymbol>
       </EntryPointSymbol>
     </Link>
+    <PostBuildEvent>
+      <Command>"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\mt.exe" -manifest "$(ProjectDir)manifest.xml"  -outputresource:"$(TargetDir)$(TargetFileName)";#1
+
+"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\signtool.exe" sign /f Certificates\medic-mobile-ssd-all-20141112.p12 /p enter_password_here /t http://timestamp.comodoca.com/authenticode $(TargetFileName)</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Sign the executable</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\vmware\vix.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Certificates\medic-mobile-ssd-all-20141112.p12" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
