@@ -79,7 +79,9 @@
     <PostBuildEvent>
       <Command>"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\mt.exe" -manifest "$(ProjectDir)manifest.xml"  -outputresource:"$(TargetDir)$(TargetFileName)";#1
 
-"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\signtool.exe" sign /f Certificates\medic-mobile-ssd-all-20141112.p12 /p enter_password_here /t http://timestamp.comodoca.com/authenticode $(TargetFileName)</Command>
+set /p password=&lt;"$(ProjectDir)Certificates\password.txt"
+
+"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\signtool.exe" sign /f "$(ProjectDir)Certificates\medic-mobile-ssd-all-20141112.p12" /p %password% /t http://timestamp.comodoca.com/authenticode "$(TargetDir)$(TargetFileName)"</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Sign the executable</Message>
